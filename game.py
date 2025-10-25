@@ -9,7 +9,7 @@ pygame.init()
 # Screen dimensions
 WIDTH, HEIGHT = 800, 600
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Pixel Shooter")
+pygame.display.set_caption("Pixel Shooter Enhanced")
 
 # Colors
 BLACK = (0, 0, 0)
@@ -21,6 +21,8 @@ YELLOW = (255, 255, 50)
 PURPLE = (180, 50, 230)
 CYAN = (0, 200, 200)
 ORANGE = (255, 150, 0)
+PINK = (255, 100, 180)
+TEAL = (0, 180, 180)
 
 # Clock for controlling frame rate
 clock = pygame.time.Clock()
@@ -39,15 +41,21 @@ class Player:
         self.max_health = 100
         self.weapon = "Pistol"
         self.weapons = {
-            "Pistol": {"damage": 10, "fire_rate": 0.5, "color": WHITE, "bullet_speed": 10},
-            "Shotgun": {"damage": 5, "fire_rate": 1.0, "color": YELLOW, "bullet_speed": 12},
-            "Laser": {"damage": 20, "fire_rate": 0.2, "color": RED, "bullet_speed": 15}
+            "Pistol": {"damage": 10, "fire_rate": 8, "color": WHITE, "bullet_speed": 10, "spread": 0},
+            "Shotgun": {"damage": 5, "fire_rate": 3, "color": YELLOW, "bullet_speed": 12, "spread": 15},
+            "Laser": {"damage": 25, "fire_rate": 1.5, "color": RED, "bullet_speed": 20, "spread": 0},
+            "Burst": {"damage": 8, "fire_rate": 4, "color": GREEN, "bullet_speed": 11, "spread": 5},
+            "Spread": {"damage": 6, "fire_rate": 2, "color": PINK, "bullet_speed": 9, "spread": 30},
+            "Railgun": {"damage": 40, "fire_rate": 1, "color": TEAL, "bullet_speed": 25, "spread": 0}
         }
         self.last_shot = 0
         self.score = 0
         self.invincible = 0
         self.power_up_timer = 0
         self.power_up_type = None
+        self.burst_count = 0
+        self.burst_delay = 0
+        self.burst_last_shot = 0
 
     def draw(self, screen):
         # Draw player ship
@@ -76,6 +84,11 @@ class Player:
         weapon_text = font.render(f"Weapon: {self.weapon}", True, self.weapons[self.weapon]["color"])
         screen.blit(weapon_text, (self.x - weapon_text.get_width()//2, self.y - 60))
         
+        # Draw power-up timer if active
+        if self.power_up_timer > 0:
+            timer_text = font.render(f"{self.power_up_timer//60}s", True, YELLOW)
+            screen.blit(timer_text, (self.x - timer_text.get_width()//2, self.y - 80))
+        
         # Draw invincibility effect
         if self.invincible > 0:
             pygame.draw.circle(screen, CYAN, (self.x, self.y), 30, 2)
@@ -94,13 +107,24 @@ class Player:
         current_time = pygame.time.get_ticks()
         weapon = self.weapons[self.weapon]
         
+        # Handle burst weapon
+        if self.weapon == "Burst" and self.burst_count > 0:
+            if current_time - self.burst_last_shot > self.burst_delay:
+                self.burst_last_shot = current_time
+                bullets.append(Bullet(self.x, self.y - 20, 0, -weapon["bullet_speed"], weapon["damage"], weapon["color"]))
+                self.burst_count -= 1
+                return True
+            return False
+        
+        # Normal shooting
         if current_time - self.last_shot > 1000 / weapon["fire_rate"]:
             self.last_shot = current_time
             
             if self.weapon == "Pistol":
                 bullets.append(Bullet(self.x, self.y - 20, 0, -weapon["bullet_speed"], weapon["damage"], weapon["color"]))
+                
             elif self.weapon == "Shotgun":
-                for angle in [-10, 0, 10]:
+                for angle in [-10, -5, 0, 5, 10]:
                     rad_angle = math.radians(angle)
                     bullets.append(Bullet(
                         self.x, self.y - 20, 
@@ -108,8 +132,30 @@ class Player:
                         -math.cos(rad_angle) * weapon["bullet_speed"], 
                         weapon["damage"], weapon["color"]
                     ))
+                    
             elif self.weapon == "Laser":
                 bullets.append(LaserBeam(self.x, self.y - 20, weapon["damage"], weapon["color"]))
+                
+            elif self.weapon == "Burst":
+                # Start burst sequence
+                self.burst_count = 3
+                self.burst_delay = 100  # ms between bursts
+                self.burst_last_shot = current_time
+                bullets.append(Bullet(self.x, self.y - 20, 0, -weapon["bullet_speed"], weapon["damage"], weapon["color"]))
+                self.burst_count -= 1
+                
+            elif self.weapon == "Spread":
+                for angle in range(-30, 31, 10):
+                    rad_angle = math.radians(angle)
+                    bullets.append(Bullet(
+                        self.x, self.y - 20, 
+                        math.sin(rad_angle) * 2, 
+                        -math.cos(rad_angle) * weapon["bullet_speed"], 
+                        weapon["damage"], weapon["color"]
+                    ))
+                    
+            elif self.weapon == "Railgun":
+                bullets.append(RailgunBeam(self.x, self.y - 20, weapon["damage"], weapon["color"]))
                 
             return True
         return False
@@ -140,6 +186,18 @@ class Player:
         elif power_type == "laser":
             self.weapon = "Laser"
             self.power_up_type = "laser"
+            self.power_up_timer = 300
+        elif power_type == "burst":
+            self.weapon = "Burst"
+            self.power_up_type = "burst"
+            self.power_up_timer = 300
+        elif power_type == "spread":
+            self.weapon = "Spread"
+            self.power_up_type = "spread"
+            self.power_up_timer = 300
+        elif power_type == "railgun":
+            self.weapon = "Railgun"
+            self.power_up_type = "railgun"
             self.power_up_timer = 300
 
 # Bullet class
@@ -186,10 +244,11 @@ class LaserBeam:
         self.y = y
         self.damage = damage
         self.color = color
-        self.width = 6
+        self.width = 8
         self.height = HEIGHT - y
         self.active = True
-        self.timer = 10  # Frames the laser stays active
+        self.timer = 15  # Frames the laser stays active
+        self.damaged_enemies = []  # Track enemies already hit by this laser
 
     def update(self):
         self.timer -= 1
@@ -203,8 +262,42 @@ class LaserBeam:
             
             # Draw glow effect
             for i in range(3):
-                glow_width = self.width + i * 4
+                glow_width = self.width + i * 6
                 alpha = 150 - i * 50
+                glow_surf = pygame.Surface((glow_width, self.height), pygame.SRCALPHA)
+                pygame.draw.rect(glow_surf, (*self.color, alpha), (0, 0, glow_width, self.height))
+                screen.blit(glow_surf, (self.x - glow_width//2, self.y))
+
+    def is_off_screen(self):
+        return not self.active
+
+# Railgun beam class
+class RailgunBeam:
+    def __init__(self, x, y, damage, color):
+        self.x = x
+        self.y = y
+        self.damage = damage
+        self.color = color
+        self.width = 4
+        self.height = HEIGHT - y
+        self.active = True
+        self.timer = 5  # Very short duration
+        self.damaged_enemies = []
+
+    def update(self):
+        self.timer -= 1
+        if self.timer <= 0:
+            self.active = False
+
+    def draw(self, screen):
+        if self.active:
+            # Draw main beam with bright core
+            pygame.draw.rect(screen, WHITE, (self.x - self.width//2, self.y, self.width, self.height))
+            
+            # Draw outer glow
+            for i in range(1, 4):
+                glow_width = self.width + i * 4
+                alpha = 100 - i * 25
                 glow_surf = pygame.Surface((glow_width, self.height), pygame.SRCALPHA)
                 pygame.draw.rect(glow_surf, (*self.color, alpha), (0, 0, glow_width, self.height))
                 screen.blit(glow_surf, (self.x - glow_width//2, self.y))
@@ -250,7 +343,7 @@ class Enemy:
         
         # Enemy shooting logic
         self.shoot_timer += 1
-        if self.shoot_timer > 60 and random.random() < 0.02:  # Shoot every ~2 seconds with some randomness
+        if self.shoot_timer > 90 and random.random() < 0.02:  # Reduced enemy shooting frequency
             self.shoot_timer = 0
             self.bullets.append(Bullet(self.x, self.y + self.height//2, 0, 5, 5, RED))
 
@@ -292,14 +385,17 @@ class PowerUp:
         self.width = 20
         self.height = 20
         self.speed = 2
-        self.type = random.choice(["health", "shotgun", "laser"])
+        self.type = random.choice(["health", "shotgun", "laser", "burst", "spread", "railgun"])
         
-        if self.type == "health":
-            self.color = GREEN
-        elif self.type == "shotgun":
-            self.color = YELLOW
-        elif self.type == "laser":
-            self.color = RED
+        color_map = {
+            "health": GREEN,
+            "shotgun": YELLOW,
+            "laser": RED,
+            "burst": GREEN,
+            "spread": PINK,
+            "railgun": TEAL
+        }
+        self.color = color_map[self.type]
 
     def update(self):
         self.y += self.speed
@@ -315,8 +411,17 @@ class PowerUp:
             pygame.draw.rect(screen, WHITE, (self.x - 6, self.y, 12, 4))
             pygame.draw.circle(screen, WHITE, (self.x, self.y - 4), 3)
         elif self.type == "laser":
-            pygame.draw.line(screen, WHITE, (self.x - 6, self.y - 6), (self.x + 6, self.y + 6), 2)
-            pygame.draw.line(screen, WHITE, (self.x - 6, self.y + 6), (self.x + 6, self.y - 6), 2)
+            pygame.draw.line(screen, WHITE, (self.x, self.y - 6), (self.x, self.y + 6), 3)
+        elif self.type == "burst":
+            for i in range(3):
+                pygame.draw.circle(screen, WHITE, (self.x - 4 + i*4, self.y), 2)
+        elif self.type == "spread":
+            pygame.draw.line(screen, WHITE, (self.x, self.y), (self.x - 5, self.y - 5), 2)
+            pygame.draw.line(screen, WHITE, (self.x, self.y), (self.x, self.y - 6), 2)
+            pygame.draw.line(screen, WHITE, (self.x, self.y), (self.x + 5, self.y - 5), 2)
+        elif self.type == "railgun":
+            pygame.draw.line(screen, WHITE, (self.x, self.y - 6), (self.x, self.y + 6), 2)
+            pygame.draw.rect(screen, WHITE, (self.x - 3, self.y - 3, 6, 6))
 
     def is_off_screen(self):
         return self.y > HEIGHT + self.height
@@ -365,7 +470,7 @@ class Game:
 
     def spawn_enemy(self):
         self.enemy_spawn_timer += 1
-        spawn_rate = max(20, 60 - self.wave * 5)  # Spawn rate increases with waves
+        spawn_rate = max(40, 120 - self.wave * 8)  # Reduced spawn rate
         
         if self.enemy_spawn_timer > spawn_rate:
             self.enemy_spawn_timer = 0
@@ -375,11 +480,11 @@ class Game:
             if self.wave < 3:
                 enemy_type = "basic"
             elif self.wave < 5:
-                enemy_type = "basic" if rand < 0.7 else "fast"
+                enemy_type = "basic" if rand < 0.8 else "fast"  # Fewer enemies
             else:
-                if rand < 0.5:
+                if rand < 0.6:
                     enemy_type = "basic"
-                elif rand < 0.8:
+                elif rand < 0.85:
                     enemy_type = "fast"
                 else:
                     enemy_type = "tank"
@@ -388,12 +493,16 @@ class Game:
             self.enemies.append(Enemy(x, -50, enemy_type))
 
     def spawn_power_up(self, x, y):
-        if random.random() < 0.2:  # 20% chance to spawn power-up
+        if random.random() < 0.3:  # Increased chance to spawn power-up
             self.power_ups.append(PowerUp(x, y))
 
     def check_collisions(self):
         # Player bullets vs enemies
         for bullet in self.bullets[:]:
+            # Skip special weapons that handle their own collisions
+            if isinstance(bullet, (LaserBeam, RailgunBeam)):
+                continue
+                
             for enemy in self.enemies[:]:
                 if (abs(bullet.x - enemy.x) < (bullet.radius + enemy.width//2) and
                     abs(bullet.y - enemy.y) < (bullet.radius + enemy.height//2)):
@@ -419,8 +528,29 @@ class Game:
             if isinstance(bullet, LaserBeam) and bullet.active:
                 for enemy in self.enemies[:]:
                     if (abs(bullet.x - enemy.x) < (bullet.width//2 + enemy.width//2) and
-                        enemy.y > bullet.y):
+                        enemy.y > bullet.y and enemy not in bullet.damaged_enemies):
                         
+                        bullet.damaged_enemies.append(enemy)
+                        if enemy.take_damage(bullet.damage):
+                            # Enemy destroyed
+                            self.score += enemy.score_value
+                            self.enemies_killed += 1
+                            self.spawn_power_up(enemy.x, enemy.y)
+                            
+                            # Create explosion particles
+                            for _ in range(20):
+                                self.particles.append(Particle(enemy.x, enemy.y, enemy.color))
+                            
+                            self.enemies.remove(enemy)
+
+        # Railgun vs enemies
+        for bullet in self.bullets[:]:
+            if isinstance(bullet, RailgunBeam) and bullet.active:
+                for enemy in self.enemies[:]:
+                    if (abs(bullet.x - enemy.x) < (bullet.width//2 + enemy.width//2) and
+                        enemy.y > bullet.y and enemy not in bullet.damaged_enemies):
+                        
+                        bullet.damaged_enemies.append(enemy)
                         if enemy.take_damage(bullet.damage):
                             # Enemy destroyed
                             self.score += enemy.score_value
@@ -527,7 +657,7 @@ class Game:
             self.game_over = True
             
         # Update wave based on enemies killed
-        if self.enemies_killed >= self.wave * 10:
+        if self.enemies_killed >= self.wave * 8:  # Reduced enemies per wave
             self.wave += 1
             self.enemies_killed = 0
 
